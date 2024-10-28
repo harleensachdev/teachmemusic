@@ -14,6 +14,7 @@ import io
 import logging
 from flask_login import UserMixin, login_user, login_required, current_user, logout_user
 from extensions import db, bcrypt, login_manager, migrate
+from models import User  # Import all your models
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -578,6 +579,14 @@ def save_rhythm_score():
             'status': 'error',
             'message': 'Error saving rhythm score'
         }), 500
+
+@app.route('/init_db')
+def init_db():
+    try:
+        db.create_all()
+        return 'Database initialized!'
+    except Exception as e:
+        return f'Error initializing database: {str(e)}'
 
 if __name__ == '__main__':
     with app.app_context():
