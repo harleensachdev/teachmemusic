@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Score Display - Music Sight-Reading</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            background-color: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        #vexflow {
+            overflow-x: auto;
+            white-space: nowrap;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .btn-primary {
+            background-color: #4a90e2;
+            border: none;
+            padding: 12px 25px;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            background-color: #357abd;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #2c3e50;
+            font-weight: 600;
+            margin-bottom: 30px;
+        }
+        .note-highlight {
+            transition: fill 0.3s ease;
+        }
+        .controls {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            border: none;
+            padding: 8px 16px;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .btn-secondary:hover {
+            background-color: #5a6268;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .fa-arrow-left {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Add back button -->
+        <div class="mb-4">
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+        
+        <h1 class="text-center">Score Display</h1>
+        
+        <!-- Add instruction section -->
+        <div class="instructions mb-4">
+            <h5 class="text-center text-muted">Instructions:</h5>
+            <ul class="text-muted">
+                <li>Click any note to hear it played individually</li>
+                <li>Use the "Play Score" button to hear the entire piece</li>
+                <li>Notes will highlight in green as they play</li>
+                <li>Return to dashboard to try different practice modes</li>
+            </ul>
+        </div>
+
+        <div class="controls">
+            <button id="playAllNotes" class="btn btn-primary">
+                <i class="fas fa-play mr-2"></i>Play Score
+            </button>
+        </div>
+        
+        <div id="vexflow" class="text-center"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if Tone.js is loaded
+            if (typeof Tone === 'undefined') {
+                console.error("Tone.js is not loaded!");
+                return;
+            }
+            console.log("Tone.js version:", Tone.version);
+
+            const VF = Vex.Flow;
+            const div = document.getElementById('vexflow');
+            const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+            renderer.resize(1200, 600);
+            const context = renderer.getContext();
+
+            const vexflowNotes = {{ vexflow_notes | tojson }};
+            console.log("VexFlow notes data:", vexflowNotes);
+
+            const measures = Object.entries(vexflowNotes);
+            console.log("Measures:", measures);
+
+            const MEASURES_PER_LINE = 4;
+            const STAVE_WIDTH = 250;
+
+            // Initialize Tone.js Synth
+            const synth = new Tone.Synth().toDestination();
+            let isPlaying = false;
+            let currentNoteIndex = 0;
+            let allNotes = [];
+
+            // Ensure the audio context is started
+            function startAudioContext() {
+                if (Tone.context.state !== 'running') {
+                    Tone.context.resume().then(() => {
+                        console.log('Audio context started');
+                    });
+                }
+            }
+
+            function noteToFrequency(note) {
+                const A4 = 440;
+                const noteToSemitones = {
+                    'c': -9, 'c#': -8, 'd': -7, 'd#': -6, 'e': -5, 'f': -4,
+                    'f#': -3, 'g': -2, 'g#': -1, 'a': 0, 'a#': 1, 'b': 2
+                };
+                const [noteName, octave] = note.toLowerCase().split('/');
+                const semitones = noteToSemitones[noteName] + (parseInt(octave) - 4) * 12;
+                return A4 * Math.pow(2, semitones / 12);
+            }
+
+            function getDuration(durationString) {
+                const durationMap = {
+                    '16': '16n',
+                    '16d': '16n.',
+                    '8': '8n',
+                    '8d': '8n.',
+                    'q': '4n',
+                    'qd': '4n.',
+                    'h': '2n',
+                    'hd': '2n.',
+                    'w': '1n'
+                };
+                return durationMap[durationString] || '4n';
+            }
+
+            // Modified playNote function to highlight currently playing note
+            function playNote(noteData, index) {
+                if (!noteData.is_rest) {
+                    const frequency = noteToFrequency(noteData.keys[0]);
+                    const duration = getDuration(noteData.duration);
+                    
+                    // Reset all notes to black first if this is an individual note play
+                    if (index === undefined) {
+                        document.querySelectorAll('.vf-notehead').forEach(note => {
+                            note.style.fill = 'black';
+                        });
+                    }
+                    
+                    // Find and highlight the current note
+                    const noteElements = document.querySelectorAll('.vf-notehead');
+                    const noteElement = noteElements[index !== undefined ? index : currentNoteIndex];
+                    if (noteElement) {
+                        noteElement.style.fill = '#4CAF50';  // Green color
+                        
+                        // If this is an individual note play (not part of sequence), reset color after duration
+                        if (index === undefined) {
+                            setTimeout(() => {
+                                noteElement.style.fill = 'black';
+                            }, Tone.Time(duration).toSeconds() * 1000);
+                        }
+                    }
+                    
+                    synth.triggerAttackRelease(frequency, duration);
+                }
+            }
+
+            // Modified playAllNotes function to handle highlighting
+            function playAllNotes() {
+                if (isPlaying) return;
+                isPlaying = true;
+                currentNoteIndex = 0;
+
+                // Reset all note colors
+                document.querySelectorAll('.vf-notehead').forEach(note => {
+                    note.style.fill = 'black';
+                });
+
+                function playNextNote() {
+                    if (currentNoteIndex < allNotes.length) {
+                        const noteData = allNotes[currentNoteIndex];
+                        playNote(noteData, currentNoteIndex);
+                        
+                        // Schedule the next note
+                        const duration = Tone.Time(getDuration(noteData.duration)).toSeconds();
+                        setTimeout(() => {
+                            currentNoteIndex++;
+                            playNextNote();
+                        }, duration * 1000);
+                    } else {
+                        isPlaying = false;
+                        // Reset all notes to black when finished
+                        setTimeout(() => {
+                            document.querySelectorAll('.vf-notehead').forEach(note => {
+                                note.style.fill = 'black';
+                            });
+                        }, 1000);
+                    }
+                }
+
+                playNextNote();
+            }
+
+            // Collect all notes from measures
+            measures.forEach(measure => {
+                allNotes = allNotes.concat(measure[1]);
+            });
+
+            // Add click event listener to the play button
+            document.getElementById('playAllNotes').addEventListener('click', function() {
+                startAudioContext();
+                playAllNotes();
+            });
+
+            function createNote(noteData, noteIndex) {
+                try {
+                    console.log("Creating note:", noteData);
+                    let duration = noteData.duration;
+                    const isDotted = duration.includes('d');
+                    
+                    if (isDotted) {
+                        duration = duration.replace('d', '');
+                    }
+                    
+                    console.log(`Duration: ${duration}, isDotted: ${isDotted}`);
+                    
+                    // Ensure the note key is properly formatted
+                    let keys = noteData.keys.map(key => {
+                        if (key.includes('/')) {
+                            return key;
+                        } else {
+                            // If octave is missing, default to octave 4
+                            return `${key}/4`;
+                        }
+                    });
+                    
+                    const note = new VF.StaveNote({
+                        clef: "treble",
+                        keys: keys,
+                        duration: noteData.is_rest ? duration + 'r' : duration
+                    });
+                    console.log("Note created:", note);
+                    
+                    if (isDotted && !noteData.is_rest) {
+                        console.log("Setting dot for note");
+                        note.addModifier(new VF.Dot());
+                    }
+
+                    if (!noteData.is_rest) {
+                        note.setStyle({ fillStyle: 'black', strokeStyle: 'black' });
+                        // Assign a unique ID to the note's SVG element
+                        note.attrs.id = `note-${noteIndex}`;
+                    }
+                    
+                    return note;
+                } catch (error) {
+                    console.error(`Error creating note: ${error.message}`, error, noteData);
+                    return null;
+                }
+            }
+
+            function calculateMeasureDuration(notes) {
+                const totalDuration = notes.reduce((total, note) => {
+                    const duration = getDuration(note.duration);
+                    if (isNaN(duration)) {
+                        console.error(`Invalid duration for note:`, note);
+                        return total;
+                    }
+                    return total + duration;
+                }, 0);
+                
+                if (isNaN(totalDuration) || totalDuration === 0) {
+                    console.error(`Invalid total duration for measure:`, notes);
+                    return 4; // Default to a whole note (4 quarter notes) if calculation fails
+                }
+                
+                return Math.ceil(totalDuration * 4) / 4; // Round up to the nearest quarter note
+            }
+
+            function createBeams(vfNotes) {
+                return VF.Beam.generateBeams(vfNotes, {
+                    groups: [new VF.Fraction(3, 4)],
+                    stem_direction: 1
+                });
+            }
+
+            measures.forEach((measure, index) => {
+                const [measureNum, notes] = measure;
+                console.log(`Rendering measure ${measureNum} with notes:`, notes);
+
+                const x = (index % MEASURES_PER_LINE) * STAVE_WIDTH + 10;
+                const y = Math.floor(index / MEASURES_PER_LINE) * 150 + 40;
+
+                const stave = new VF.Stave(x, y, STAVE_WIDTH);
+                if (index % MEASURES_PER_LINE === 0) {
+                    stave.addClef('treble').addTimeSignature('3/4');
+                }
+                stave.setContext(context).draw();
+
+                let vfNotes = notes.map((noteData, noteIndex) => createNote(noteData, noteIndex)).filter(note => note !== null);
+                console.log(`Created VexFlow notes for measure ${measureNum}:`, vfNotes);
+
+                if (vfNotes.length === 0) {
+                    vfNotes = [new VF.StaveNote({ clef: "treble", keys: ["b/4"], duration: "wr" })];
+                }
+
+                const measureDuration = calculateMeasureDuration(notes);
+                console.log(`Calculated duration for measure ${measureNum}: ${measureDuration}`);
+
+                const voice = new VF.Voice({ num_beats: measureDuration, beat_value: 4 });
+                voice.setStrict(false);
+                voice.addTickables(vfNotes);
+
+                const beams = createBeams(vfNotes);
+
+                try {
+                    new VF.Formatter().joinVoices([voice]).format([voice], STAVE_WIDTH - 50);
+                    voice.draw(context, stave);
+                    beams.forEach(beam => beam.setContext(context).draw());
+                } catch (error) {
+                    console.error(`Error formatting measure ${measureNum}:`, error);
+                    context.fillText(`Error in measure ${measureNum}`, x, y - 10);
+                }
+
+                stave.setMeasure(parseInt(measureNum));
+            });
+
+            // Add click event listeners to the SVG elements
+            function attachClickListeners() {
+                const noteElements = document.querySelectorAll('svg g.vf-notehead');
+                console.log(`Found ${noteElements.length} note elements`);
+                
+                noteElements.forEach((element, index) => {
+                    console.log(`Attaching click listener to note element with index: ${index}`);
+                    element.addEventListener('click', function(event) {
+                        event.stopPropagation();
+                        console.log(`Note clicked: ${index}`);
+                        startAudioContext();
+                        playNote(allNotes[index]);
+                    });
+                });
+            }
+
+            // Call the function after a short delay to ensure the SVG is fully rendered
+            setTimeout(attachClickListeners, 1000);
+
+            console.log("VexFlow rendering completed.");
+        });
+    </script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://kit.fontawesome.com/your-font-awesome-kit.js"></script>
+</body>
+</html>

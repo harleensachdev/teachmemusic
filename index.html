@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Score Recognition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vexflow/3.0.9/vexflow-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+</head>
+<body>
+    <h1>Music Score Recognition</h1>
+    <input type="file" id="fileInput" accept="image/*">
+    <div id="output"></div>
+    <div id="score"></div>
+    <script>
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('output').innerHTML = `
+                    <p>Time Signature: ${data.time_signature}</p>
+                    <p>Key Signature: ${data.key_signature}</p>
+                    <p>Clef: ${data.clef}</p>
+                `;
+                renderScore(data);
+            });
+        });
+
+        function renderScore(data) {
+            const VF = Vex.Flow;
+            const div = document.getElementById('score');
+            div.innerHTML = '';
+            const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+            renderer.resize(800, 200);
+            const context = renderer.getContext();
+            const stave = new VF.Stave(10, 40, 750);
+            stave.addClef(data.clef).addTimeSignature(data.time_signature);
+            stave.setContext(context).draw();
+
+            const notes = data.notes.map(note => {
+                if (note.pitch === 'Rest') {
+                    return new VF.StaveNote({clef: data.clef, keys: ["b/4"], duration: note.duration + "r"});
+                } else {
+                    return new VF.StaveNote({clef: data.clef, keys: [note.pitch.toLowerCase()], duration: note.duration + ""});
+                }
+            });
+
+            const voice = new VF.Voice({num_beats: 4, beat_value: 4});
+            voice.addTickables(notes);
+            new VF.Formatter().joinVoices([voice]).format([voice], 750);
+            voice.draw(context, stave);
+
+            // Add click event listeners for playback
+            div.querySelectorAll('.vf-stavenote').forEach((noteElement, index) => {
+                noteElement.addEventListener('click', () => {
+                    const note = data.notes[index];
+                    if (note.pitch !== 'Rest') {
+                        const sound = new Howl({
+                            src: [`https://tonejs.github.io/audio/salamander/${note.pitch}.mp3`],
+                            volume: 0.5
+                        });
+                        sound.play();
+                    }
+                });
+            });
+        }
+    </script>
+</body>
+</html>

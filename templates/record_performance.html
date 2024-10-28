@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Check - Music Sight-Reading</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <style>
+        .btn-secondary {
+            background-color: #6c757d;
+            border: none;
+            padding: 8px 16px;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+            background-color: #5a6268;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .fa-arrow-left {
+            margin-right: 8px;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <!-- Add back button -->
+        <div class="mb-4">
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+        
+        <h1 class="text-center mb-4">Pitch Check</h1>
+        
+        <!-- Add instruction section -->
+        <div class="instructions mb-4">
+            <h5 class="text-center text-muted">Instructions:</h5>
+            <ul class="text-muted">
+                <li>Allow microphone access when prompted</li>
+                <li>Press "Start Pitch Check" to begin</li>
+                <li>Sing or play each note in the score</li>
+                <li>The current note you should perform is shown below the score</li>
+                <li>Notes will change color based on your pitch accuracy:
+                    <ul>
+                        <li class="text-success">Green: Correct pitch (±20 cents)</li>
+                        <li class="text-danger">Red: Incorrect pitch</li>
+                    </ul>
+                </li>
+                <li>The display shows your pitch deviation in cents</li>
+                <li>Use "Stop" to pause and "Redo" to start over</li>
+            </ul>
+        </div>
+
+        <div id="vexflow" class="mb-4"></div>
+        
+        <div id="currentNote" class="text-center mb-3">
+            <h3>Current Note: <span id="currentNoteDisplay">-</span></h3>
+        </div>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <button id="startPitchCheck" class="btn btn-primary btn-block mb-3">Start Pitch Check</button>
+                <button id="stopPitchCheck" class="btn btn-danger btn-block mb-3" disabled>Stop Pitch Check</button>
+                <button id="redoPitchCheck" class="btn btn-secondary btn-block mb-3">Redo Pitch Check</button>
+            </div>
+        </div>
+        
+        <div id="feedback" class="mt-4"></div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioContext;
+        let analyser;
+        let source;
+        let dataArray;
+        let lastDetectedNote = null;
+        let noteDetectionCount = 0;
+        let currentNoteIndex = 0; // Add this line
+        const NOTE_DETECTION_THRESHOLD = 3; // Number of consistent detections before accepting a note
+        const NOISE_FLOOR = -50; // Adjust this value based on your environment
+        let vexflowNotes = {{ vexflow_notes | tojson | safe }};
+        let allNotes = [];
+        let noteElements = [];
+        let currentNoteDisplay;
+
+        document.getElementById('startPitchCheck').addEventListener('click', startRecording);
+        document.getElementById('stopPitchCheck').addEventListener('click', stopRecording);
+        document.getElementById('redoPitchCheck').addEventListener('click', redoPitchCheck);
+
+        // Render VexFlow staves
+        document.addEventListener('DOMContentLoaded', function() {
+            const VF = Vex.Flow;
+            const div = document.getElementById('vexflow');
+            const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+            renderer.resize(800, 200);
+            const context = renderer.getContext();
+
+            const stave = new VF.Stave(10, 40, 750);
+            stave.addClef('treble').addTimeSignature('4/4');
+            stave.setContext(context).draw();
+
+            const notes = Object.values(vexflowNotes).flat().map(noteData => {
+                const vfNote = new VF.StaveNote({
+                    clef: "treble",
+                    keys: noteData.keys,
+                    duration: noteData.duration
+                });
+                allNotes.push(vfNote);
+                return vfNote;
+            });
+
+            VF.Formatter.FormatAndDraw(context, stave, notes);
+
+            noteElements = document.querySelectorAll('#vexflow .vf-notehead');
+            currentNoteDisplay = document.getElementById('currentNoteDisplay');
+        });
+
+        const A4_FREQUENCY = 440;
+        const SEMITONE_RATIO = Math.pow(2, 1/12);
+
+        async function startRecording() {
+            // If we're continuing from a pause, don't reset currentNoteIndex
+            if (!audioContext) {
+                // Only initialize stream and audio context if we're starting fresh
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.8;
+                analyser.minDecibels = -100;
+                analyser.maxDecibels = -10;
+
+                const bufferLength = analyser.frequencyBinCount;
+                dataArray = new Float32Array(bufferLength);
+            } else if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            mediaRecorder.start();
+            document.getElementById('startPitchCheck').disabled = true;
+            document.getElementById('stopPitchCheck').disabled = false;
+
+            console.log("Recording started/resumed, audio context set up");
+            detectNote();
+        }
+
+        function detectNote() {
+            analyser.getFloatFrequencyData(dataArray);
+            const dominantFrequency = findDominantFrequency(dataArray, audioContext.sampleRate);
+            
+            if (dominantFrequency) {
+                const note = frequencyToNote(dominantFrequency);
+                const noteString = `${note.name}${note.octave}`;
+                if (noteString === lastDetectedNote) {
+                    noteDetectionCount++;
+                    if (noteDetectionCount >= NOTE_DETECTION_THRESHOLD) {
+                        console.log(`Detected frequency: ${dominantFrequency.toFixed(2)} Hz, Note: ${noteString} (${note.cents} cents)`);
+                        displayCurrentNote(note);
+                        checkNote(note);
+                    }
+                } else {
+                    lastDetectedNote = noteString;
+                    noteDetectionCount = 1;
+                }
+            } else {
+                lastDetectedNote = null;
+                noteDetectionCount = 0;
+                displayCurrentNote({ name: '-', octave: '', cents: 0 });
+            }
+            requestAnimationFrame(detectNote);
+        }
+
+        function findDominantFrequency(dataArray, sampleRate) {
+            const minFreq = 196;  // G3
+            const maxFreq = 3520; // A7
+            const minIndex = Math.floor(minFreq * dataArray.length / sampleRate);
+            const maxIndex = Math.ceil(maxFreq * dataArray.length / sampleRate);
+            
+            let maxAmplitude = NOISE_FLOOR;
+            let dominantFrequencyIndex = -1;
+
+            for (let i = minIndex; i <= maxIndex; i++) {
+                if (dataArray[i] > maxAmplitude) {
+                    maxAmplitude = dataArray[i];
+                    dominantFrequencyIndex = i;
+                }
+            }
+
+            if (maxAmplitude > NOISE_FLOOR) {
+                return dominantFrequencyIndex * sampleRate / (dataArray.length * 2);
+            }
+            return null;
+        }
+
+        function frequencyToNote(frequency) {
+            const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const a4 = 440;
+            const a4Index = 69; // MIDI note number for A4
+
+            const halfStepsFromA4 = 12 * Math.log2(frequency / a4);
+            const midiNoteNumber = Math.round(a4Index + halfStepsFromA4);
+            
+            const octave = Math.floor((midiNoteNumber - 12) / 12);
+            const noteIndex = (midiNoteNumber - 12) % 12;
+
+            // Calculate cents deviation
+            const exactFrequency = a4 * Math.pow(2, (midiNoteNumber - a4Index) / 12);
+            const cents = Math.round(1200 * Math.log2(frequency / exactFrequency));
+
+            return {
+                name: noteNames[noteIndex],
+                octave: octave,
+                cents: cents
+            };
+        }
+
+        function displayCurrentNote(note) {
+            if (note && note.name !== '-') {
+                currentNoteDisplay.textContent = `${note.name}${note.octave} (${note.cents > 0 ? '+' : ''}${note.cents} cents)`;
+            } else {
+                currentNoteDisplay.textContent = '-';
+            }
+        }
+
+        function checkNote(detectedNote) {
+            if (currentNoteIndex >= allNotes.length) return;
+
+            const expectedNote = allNotes[currentNoteIndex].keys[0].replace('/', '').toLowerCase();
+            const [expectedNoteName, expectedOctave] = [expectedNote.slice(0, -1), parseInt(expectedNote.slice(-1))];
+            
+            const isCorrect = detectedNote.name.toLowerCase() === expectedNoteName && 
+                              detectedNote.octave === expectedOctave &&
+                              Math.abs(detectedNote.cents) <= 30; // Changed from 30 to 20 cents
+
+            console.log(`Detected: ${detectedNote.name}${detectedNote.octave} (${detectedNote.cents} cents), Expected: ${expectedNote}, Correct: ${isCorrect}`);
+
+            highlightNote(currentNoteIndex, isCorrect, detectedNote.cents);
+
+            if (isCorrect) {
+                currentNoteIndex++;
+            }
+        }
+
+        function highlightNote(index, isCorrect, cents) {
+            const noteElement = noteElements[index];
+            if (noteElement) {
+                if (isCorrect) {
+                    const greenIntensity = Math.max(0, 255 - Math.abs(cents) * 4);
+                    noteElement.style.fill = `rgb(0, ${greenIntensity}, 0)`;
+                } else {
+                    const redIntensity = Math.min(255, 128 + Math.abs(cents) * 2);
+                    noteElement.style.fill = `rgb(${redIntensity}, 0, 0)`;
+                }
+            }
+        }
+
+        function stopRecording() {
+            if (audioContext) {
+                audioContext.suspend(); // Pause instead of stopping completely
+            }
+            
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.pause(); // Pause instead of stopping
+            }
+
+            document.getElementById('startPitchCheck').disabled = false;
+            document.getElementById('stopPitchCheck').disabled = true;
+            displayCurrentNote('-');
+            
+            console.log("Recording paused");
+        }
+
+        function submitRecording() {
+            console.log("Submit recording");
+         }
+
+        function displayFeedback(feedback, accuracy, correctNotes, incorrectNotes) {
+            const feedbackDiv = document.getElementById('feedback');
+            feedbackDiv.innerHTML = `
+                <h2>Feedback</h2>
+                <p>${feedback}</p>
+                <p>Accuracy: ${(accuracy * 100).toFixed(2)}%</p>
+            `;
+
+            noteElements.forEach(el => el.style.fill = '');
+            correctNotes.forEach(index => highlightNote(index, true));
+            incorrectNotes.forEach(index => highlightNote(index, false));
+        }
+
+        function redoPitchCheck() {
+            // Stop any ongoing recording
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+            }
+
+            // Close existing audio context
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null; // Important to set to null
+            }
+
+            // Reset all variables
+            currentNoteIndex = 0;
+            lastDetectedNote = null;
+            noteDetectionCount = 0;
+            audioChunks = [];
+            
+            // Reset all note colors back to black
+            noteElements.forEach(el => {
+                el.style.fill = 'black';
+            });
+            
+            // Reset UI elements
+            document.getElementById('startPitchCheck').disabled = false;
+            document.getElementById('stopPitchCheck').disabled = true;
+            document.getElementById('currentNoteDisplay').textContent = '-';
+            document.getElementById('feedback').innerHTML = '';
+
+            // Clear any media streams
+            if (source) {
+                source.disconnect();
+                source = null;
+            }
+            if (analyser) {
+                analyser.disconnect();
+                analyser = null;
+            }
+            if (mediaRecorder) {
+                mediaRecorder = null;
+            }
+
+            console.log("Pitch check fully reset. Ready to start again.");
+        }
+    </script>
+</body>
+</html>

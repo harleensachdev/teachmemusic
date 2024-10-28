@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Music Sight-Reading</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .card {
+            border: none;
+            border-radius: 15px;
+        }
+        .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid rgba(0,0,0,.125);
+            border-radius: 15px 15px 0 0 !important;
+            padding: 1.5rem;
+        }
+        .card-body {
+            padding: 2rem;
+        }
+        .card-footer {
+            background-color: #f8f9fa;
+            border-top: 1px solid rgba(0,0,0,.125);
+            border-radius: 0 0 15px 15px !important;
+            padding: 1.5rem;
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+        .btn:last-child {
+            margin-bottom: 0;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .alert {
+            border-radius: 8px;
+        }
+        h3 {
+            color: #2c3e50;
+            font-weight: 600;
+            margin: 0;
+        }
+        h4 {
+            color: #34495e;
+            margin-bottom: 1.5rem;
+        }
+        .feature-description {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow-lg">
+                    <div class="card-header text-center">
+                        <h3>Welcome, {{ current_user.username }}!</h3>
+                    </div>
+                    <div class="card-body">
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                {% for category, message in messages %}
+                                    <div class="alert alert-{{ category }} alert-dismissible fade show mb-4" role="alert">
+                                        {{ message }}
+                                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                            <span aria-hidden="true">&times;</span>
+                                        </button>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endwith %}
+
+                        <h4 class="text-center">Score Management</h4>
+                        <form action="{{ url_for('upload_score') }}" method="POST" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="music_score" class="font-weight-bold">Select Image, MusicXML, or MIDI file</label>
+                                <p class="feature-description">Upload your music score in any supported format</p>
+                                <input type="file" name="music_score" id="music_score" class="form-control-file" accept="image/*,.xml,.musicxml,.mid,.midi" required>
+                            </div>
+                            <div class="d-flex flex-column">
+                                <button type="submit" class="btn btn-primary">Runthrough Score</button>
+                                <p class="feature-description">View and listen to your uploaded score with audio playback</p>
+                                
+                                <a href="{{ url_for('record_performance') }}" class="btn btn-success">Use Score for Pitch Check</a>
+                                <p class="feature-description">Practice singing or playing the correct notes with real-time feedback</p>
+                                
+                                <a href="{{ url_for('rhythm_check') }}" class="btn btn-info">Use Score for Rhythm Check</a>
+                                <p class="feature-description">Practice tapping the correct rhythm and get accuracy feedback</p>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="card-footer text-center">
+                        <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
+                        <p class="feature-description mt-2">End your session and return to login page</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

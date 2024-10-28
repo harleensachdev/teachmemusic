@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rhythm Check - Music Sight-Reading</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        .metronome-light {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #ccc;
+            margin: 10px auto;
+        }
+        .metronome-light.active {
+            background-color: #ff4444;
+        }
+        .tap-area {
+            height: 150px;
+            background-color: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin: 20px 0;
+            user-select: none;
+        }
+        .tap-area:active {
+            background-color: #e9ecef;
+        }
+        #accuracyMeter {
+            width: 100%;
+            height: 20px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        #accuracyBar {
+            height: 100%;
+            width: 0%;
+            background-color: #28a745;
+            transition: width 0.3s ease;
+        }
+        .input-mode-toggle {
+            margin-bottom: 20px;
+        }
+        /* Add these styles to your existing <style> section */
+        .vf-stavenote.note-good path {
+            fill: #28a745 !important;
+            stroke: #28a745 !important;
+        }
+
+        .vf-stavenote.note-okay path {
+            fill: #ffc107 !important;
+            stroke: #ffc107 !important;
+        }
+
+        .vf-stavenote.note-bad path {
+            fill: #dc3545 !important;
+            stroke: #dc3545 !important;
+        }
+
+        /* Keep note stems black */
+        .vf-stavenote path.stem {
+            fill: #000000 !important;
+            stroke: #000000 !important;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+            border: none;
+            padding: 8px 16px;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+            background-color: #5a6268;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .fa-arrow-left {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <!-- Add back button -->
+        <div class="mb-4">
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+        
+        <h1 class="text-center mb-4">Rhythm Check</h1>
+        
+        <!-- Add instruction section -->
+        <div class="instructions mb-4">
+            <h5 class="text-center text-muted">Instructions:</h5>
+            <ul class="text-muted">
+                <li>Adjust the tempo using the slider if needed</li>
+                <li>Press "Start" to begin the rhythm check</li>
+                <li>Tap the space bar or click the tap area in time with the music</li>
+                <li>Notes will change color based on your accuracy:
+                    <ul>
+                        <li class="text-success">Green: Excellent timing (±15%)</li>
+                        <li class="text-warning">Yellow: Good timing (±30%)</li>
+                        <li class="text-danger">Red: Needs improvement (>30%)</li>
+                    </ul>
+                </li>
+                <li>Your overall accuracy score will be shown at the bottom</li>
+                <li>Use "Redo" to try again</li>
+            </ul>
+        </div>
+
+        <div id="vexflow" class="mb-4"></div>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <!-- Delete this section -->
+                        <!--<div class="input-mode-toggle text-center">
+                            <div class="btn-group" role="group">
+                                <button id="spacebarMode" class="btn btn-primary active">Spacebar Mode</button>
+                                <button id="audioMode" class="btn btn-secondary">Audio Mode</button>
+                            </div>
+                        </div>-->
+
+                        <div class="metronome-light" id="metronomeLight"></div>
+                        <div class="text-center mb-3">
+                            <h4>Tempo: <span id="tempoDisplay">120</span> BPM</h4>
+                            <input type="range" class="custom-range" id="tempoSlider" min="40" max="208" value="120">
+                        </div>
+                        
+                        <div class="btn-group d-flex mb-3" role="group">
+                            <button id="startButton" class="btn btn-primary w-100">Start</button>
+                            <button id="stopButton" class="btn btn-danger w-100" disabled>Stop</button>
+                        </div>
+
+                        <!-- Keep only the spacebar input section -->
+                        <div id="tapArea" class="tap-area">
+                            <h3>Tap Here or Press Spacebar</h3>
+                        </div>
+
+                        <!-- Remove the audio input section -->
+                        <!--<div id="audioInput" style="display: none;">...</div>-->
+
+                        <div class="text-center">
+                            <h5>Accuracy</h5>
+                            <div id="accuracyMeter">
+                                <div id="accuracyBar"></div>
+                            </div>
+                            <p>Score: <span id="accuracyScore">0</span>%</p>
+                        </div>
+                        <button id="redoButton" class="btn btn-secondary btn-block mt-3">Redo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let vexflowNotes = {{ vexflow_notes | tojson | safe }};
+        let metronome;
+        let isPlaying = false;
+        let expectedTaps = [];
+        let userTaps = [];
+        let tempo = 120;
+        let startTime;
+        let hasStartedPlaying = false;
+        let isFinished = false;
+        let lastMetronomeTime = 0;
+        let metronomeAudioContext;
+
+        // Constants
+        const THRESHOLD = 0.1;              // Volume threshold for note detection
+        const METRONOME_IGNORE_TIME = 100;  // ms to ignore after metronome click
+        const MIN_TIME_BETWEEN_NOTES = 200; // ms between allowed notes
+
+        // Add these constants for accuracy thresholds
+        const ACCURACY_THRESHOLDS = {
+            GOOD: 85,    // >= 85% accuracy is good (green)
+            OKAY: 60     // >= 60% accuracy is okay (yellow), below is bad (red)
+        };
+
+        // Expanded duration map for generateExpectedTaps function
+        const durationMap = {
+            // Whole notes
+            'w': 4,          // Whole note
+            'wd': 6,         // Dotted whole note
+            'wdd': 7,        // Double dotted whole note
+            
+            // Half notes
+            'h': 2,          // Half note
+            'hd': 3,         // Dotted half note
+            'hdd': 3.5,      // Double dotted half note
+            
+            // Quarter notes
+            'q': 1,          // Quarter note
+            'qd': 1.5,       // Dotted quarter note
+            'qdd': 1.75,     // Double dotted quarter note
+            
+            // Eighth notes
+            '8': 0.5,        // Eighth note
+            '8d': 0.75,      // Dotted eighth note
+            '8dd': 0.875,    // Double dotted eighth note
+            
+            // Sixteenth notes
+            '16': 0.25,      // Sixteenth note
+            '16d': 0.375,    // Dotted sixteenth note
+            '16dd': 0.4375,  // Double dotted sixteenth note
+            
+            // 32nd notes
+            '32': 0.125,     // 32nd note
+            '32d': 0.1875,   // Dotted 32nd note
+            
+            // Triplets
+            '8tr': 0.33333,  // Eighth triplet
+            'qtr': 0.66667,  // Quarter triplet
+            'htr': 1.33333,  // Half triplet
+            
+            // Common time modifications
+            '4r': 1,         // Quarter rest
+            '2r': 2,         // Half rest
+            'wr': 4,         // Whole rest
+            '8r': 0.5,       // Eighth rest
+            '16r': 0.25,     // Sixteenth rest
+            '32r': 0.125     // 32nd rest
+        };
+
+        // Add these variables to the top with other state variables
+        let pausedTime = 0;
+        let totalPausedTime = 0;
+        let lastPauseTime = 0;
+
+        // Initialize VexFlow
+        document.addEventListener('DOMContentLoaded', initializeVexFlow);
+
+        // Event Listeners
+        document.getElementById('startButton').addEventListener('click', startRhythmCheck);
+        document.getElementById('stopButton').addEventListener('click', stopRhythmCheck);
+        document.getElementById('redoButton').addEventListener('click', () => window.location.reload());
+        document.getElementById('tapArea').addEventListener('click', handleTap);
+        
+        const tempoSlider = document.getElementById('tempoSlider');
+        tempoSlider.addEventListener('input', function() {
+            tempo = parseInt(this.value);
+            document.getElementById('tempoDisplay').textContent = tempo;
+        });
+
+        // Add spacebar listener
+        document.addEventListener('keydown', function(event) {
+            if (event.code === 'Space' && !event.repeat) {
+                event.preventDefault();
+                handleTap();
+            }
+        });
+
+        function startRhythmCheck() {
+            if (isFinished) {
+                // If finished, treat as complete restart
+                window.location.reload();
+                return;
+            }
+
+            isPlaying = true;
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+
+            if (!hasStartedPlaying) {
+                // First time starting
+                startTime = Date.now();
+                resetNoteColors();
+                generateExpectedTaps();
+            } else {
+                // Resuming from pause
+                totalPausedTime += Date.now() - lastPauseTime;
+                startTime = Date.now() - (pausedTime - totalPausedTime);
+            }
+
+            startMetronome();
+            document.getElementById('startButton').textContent = 'Resume';
+        }
+
+        function stopRhythmCheck() {
+            isPlaying = false;
+            clearInterval(metronome);
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+            
+            if (hasStartedPlaying) {
+                lastPauseTime = Date.now();
+                pausedTime = Date.now() - startTime;
+            }
+
+            if (userTaps.length >= expectedTaps.length) {
+                isFinished = true;
+            }
+            
+            calculateAccuracy();
+        }
+
+        function startMetronome() {
+            const interval = 60000 / tempo;
+            metronome = setInterval(() => {
+                document.getElementById('metronomeLight').classList.add('active');
+                setTimeout(() => {
+                    document.getElementById('metronomeLight').classList.remove('active');
+                }, 100);
+                lastMetronomeTime = Date.now();
+                playMetronomeSound();
+            }, interval);
+        }
+
+        function handleTap() {
+            if (!isPlaying || isFinished) return;
+            
+            const currentTime = Date.now();
+            const adjustedTapTime = currentTime - startTime - totalPausedTime;
+            
+            if (!hasStartedPlaying) {
+                hasStartedPlaying = true;
+                startTime = currentTime;
+                userTaps = [0];
+                colorNote(0);
+            } else {
+                userTaps.push(adjustedTapTime);
+                colorNote(userTaps.length - 1);
+            }
+
+            if (userTaps.length >= expectedTaps.length) {
+                isFinished = true;
+                stopRhythmCheck();
+                document.getElementById('startButton').textContent = 'Start New';
+            } else {
+                calculateAccuracy();
+            }
+        }
+
+        function calculateAccuracy() {
+            if (!hasStartedPlaying || userTaps.length === 0) return;
+
+            const beatDuration = 60000 / tempo;
+            const maxDeviation = beatDuration * 0.3;
+            
+            const accuracies = userTaps.map((tapTime, index) => {
+                if (index >= expectedTaps.length) return 0;
+                const expectedTime = expectedTaps[index];
+                const deviation = Math.abs(tapTime - expectedTime);
+                return Math.max(0, 100 - (deviation / maxDeviation * 100));
+            });
+
+            const finalAccuracy = accuracies.reduce((a, b) => a + b, 0) / 
+                Math.max(expectedTaps.length, userTaps.length);
+            
+            document.getElementById('accuracyScore').textContent = finalAccuracy.toFixed(1);
+            document.getElementById('accuracyBar').style.width = `${finalAccuracy}%`;
+        }
+
+        function generateExpectedTaps() {
+            expectedTaps = [];
+            const beatDuration = 60000 / tempo; // Duration of one beat in milliseconds
+            
+            let currentTime = 0;
+            Object.values(vexflowNotes).flat().forEach(note => {
+                expectedTaps.push(currentTime);
+                
+                // Get duration from map, default to quarter note (1 beat) if not found
+                const beats = durationMap[note.duration] || 1;
+                currentTime += beats * beatDuration;
+            });
+
+            console.log('Expected tap times generated:', expectedTaps);
+        }
+
+        function initializeVexFlow() {
+            const VF = Vex.Flow;
+            const div = document.getElementById('vexflow');
+            div.innerHTML = ''; // Clear previous content
+            
+            const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+            renderer.resize(800, 200);
+            const context = renderer.getContext();
+
+            const stave = new VF.Stave(10, 40, 750);
+            stave.addClef('treble').addTimeSignature('4/4');
+            stave.setContext(context).draw();
+
+            const notes = Object.values(vexflowNotes).flat().map(noteData => {
+                return new VF.StaveNote({
+                    clef: "treble",
+                    keys: noteData.keys,
+                    duration: noteData.duration
+                });
+            });
+
+            // Add CSS classes to notes for easier selection
+            notes.forEach((note, index) => {
+                note.setAttribute('class', 'vf-stavenote note-' + index);
+            });
+
+            VF.Formatter.FormatAndDraw(context, stave, notes);
+        }
+
+        function playMetronomeSound() {
+            if (!metronomeAudioContext) {
+                metronomeAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            const oscillator = metronomeAudioContext.createOscillator();
+            const gainNode = metronomeAudioContext.createGain();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(1000, metronomeAudioContext.currentTime);
+            
+            gainNode.gain.setValueAtTime(0, metronomeAudioContext.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.3, metronomeAudioContext.currentTime + 0.001);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, metronomeAudioContext.currentTime + 0.05);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(metronomeAudioContext.destination);
+            
+            oscillator.start(metronomeAudioContext.currentTime);
+            oscillator.stop(metronomeAudioContext.currentTime + 0.05);
+        }
+
+        // Add this function to color individual notes
+        function colorNote(noteIndex) {
+            const beatDuration = 60000 / tempo;
+            const maxDeviation = beatDuration * 0.3;
+            const expectedTime = expectedTaps[noteIndex];
+            const actualTime = userTaps[noteIndex];
+            const deviation = Math.abs(actualTime - expectedTime);
+            const accuracy = Math.max(0, 100 - (deviation / maxDeviation * 100));
+
+            // Get the note element
+            const noteElements = document.querySelectorAll('.vf-stavenote');
+            if (noteElements[noteIndex]) {
+                // Remove any existing color classes
+                noteElements[noteIndex].classList.remove('note-good', 'note-okay', 'note-bad');
+                
+                // Add appropriate color class based on accuracy
+                if (accuracy >= ACCURACY_THRESHOLDS.GOOD) {
+                    noteElements[noteIndex].classList.add('note-good');
+                } else if (accuracy >= ACCURACY_THRESHOLDS.OKAY) {
+                    noteElements[noteIndex].classList.add('note-okay');
+                } else {
+                    noteElements[noteIndex].classList.add('note-bad');
+                }
+            }
+        }
+
+        // Add this function to reset note colors
+        function resetNoteColors() {
+            const noteElements = document.querySelectorAll('.vf-stavenote');
+            noteElements.forEach(note => {
+                note.classList.remove('note-good', 'note-okay', 'note-bad');
+            });
+        }
+    </script>
+</body>
+</html>
