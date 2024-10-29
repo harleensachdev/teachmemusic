@@ -14,7 +14,6 @@ import io
 import logging
 from flask_login import UserMixin, login_user, login_required, current_user, logout_user
 from extensions import db, bcrypt, login_manager, migrate
-from models import User  # Import all your models
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -23,6 +22,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# Configuration
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-default-secret-key')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///your_database_name.db')
 app.config['UPLOAD_FOLDER'] = 'uploads/'
@@ -48,13 +48,13 @@ class User(UserMixin, db.Model):
 class PerformanceAnalysis(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    score_id = db.Column(db.Integer, db.ForeignKey('score.id'), nullable=False)  # Change from note_data.id to score.id
+    score_id = db.Column(db.Integer, db.ForeignKey('score.id'), nullable=False)
     accuracy = db.Column(db.Float, nullable=False)
     feedback = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship('User', backref=db.backref('performances', lazy=True))
-    score = db.relationship('Score', backref=db.backref('performances', lazy=True))  # Update relationship
+    score = db.relationship('Score', backref=db.backref('performances', lazy=True))
 
 class Score(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -165,166 +165,6 @@ def upload_score():
         flash('Invalid file type. Only PNG, JPG, JPEG, MusicXML, and MIDI files are allowed.', 'danger')
         return redirect(url_for('dashboard'))
 
-def store_notes(notes):
-    try:
-        # Create a new Score object
-        new_score = Score(title="Uploaded Score")  # You might want to get a title from the user
-        db.session.add(new_score)
-        db.session.flush()  # This will assign an ID to new_score without committing the transaction
-
-        for note in notes:
-            new_note = NoteData(
-                measure=note['measure'],
-                note_name=note['pitch'],
-                duration=str(note['duration']),
-                score_id=new_score.id  # Use the ID of the newly created Score
-            )
-            db.session.add(new_note)
-        
-        db.session.commit()
-        logger.debug(f"Stored new score with id {new_score.id} and {len(notes)} notes")
-        return new_score.id
-    except Exception as e:
-        logger.error(f'Error storing notes: {e}')
-        db.session.rollback()
-        raise
-
-def quantize_duration(duration):
-    """Convert note duration to VexFlow duration format."""
-    # Duration mapping from numerical values to VexFlow format
-    duration_map = {
-        # Whole notes
-        '4.0': 'w',     # Whole note
-        '6.0': 'wd',    # Dotted whole
-        '7.0': 'wdd',   # Double dotted whole
-        
-        # Half notes
-        '2.0': 'h',     # Half note
-        '3.0': 'hd',    # Dotted half
-        '3.5': 'hdd',   # Double dotted half
-        
-        # Quarter notes
-        '1.0': 'q',     # Quarter note
-        '1.5': 'qd',    # Dotted quarter
-        '1.75': 'qdd',  # Double dotted quarter
-        
-        # Eighth notes
-        '0.5': '8',     # Eighth note
-        '0.75': '8d',   # Dotted eighth
-        '0.875': '8dd', # Double dotted eighth
-        
-        # Sixteenth notes
-        '0.25': '16',   # Sixteenth note
-        '0.375': '16d', # Dotted sixteenth
-        '0.4375': '16dd', # Double dotted sixteenth
-        
-        # 32nd notes
-        '0.125': '32',  # 32nd note
-        '0.1875': '32d', # Dotted 32nd
-        
-        # Triplets
-        '0.33333': '8tr',  # Eighth triplet
-        '0.66667': 'qtr',  # Quarter triplet
-        '1.33333': 'htr',  # Half triplet
-        
-        # Rests
-        'rest_4.0': 'wr',   # Whole rest
-        'rest_2.0': '2r',   # Half rest
-        'rest_1.0': '4r',   # Quarter rest
-        'rest_0.5': '8r',   # Eighth rest
-        'rest_0.25': '16r', # Sixteenth rest
-        'rest_0.125': '32r' # 32nd rest
-    }
-    
-    # Convert duration to string for lookup
-    duration_str = str(float(duration))
-    
-    # Handle rests
-    if isinstance(duration, str) and duration.startswith('rest'):
-        duration_str = f'rest_{duration.split("_")[1]}'
-    
-    # Return mapped duration or default to quarter note
-    return duration_map.get(duration_str, 'q')
-
-@app.route("/display_score")
-@login_required
-def display_score():
-    score_id = request.args.get('score_id')
-    notes = NoteData.query.filter_by(score_id=score_id).order_by(NoteData.measure, NoteData.id).all()
-    image_filename = request.args.get('image', '')
-    uploaded_image_url = url_for('static', filename=f'uploads/{image_filename}')
-    
-    vexflow_notes = defaultdict(list)
-    for note in notes:
-        vexflow_duration = quantize_duration(note.duration)
-        
-        if note.note_name.lower() == 'rest':
-            note_key = "b/4"
-            is_rest = True
-        else:
-            note_name = note.note_name[:-1].lower()
-            octave = note.note_name[-1]
-            note_key = f"{note_name}/{octave}"
-            is_rest = False
-        
-        note_data = {
-            "keys": [note_key],
-            "duration": vexflow_duration,
-            "is_rest": is_rest
-        }
-        vexflow_notes[note.measure].append(note_data)
-    
-    vexflow_notes_dict = {str(k): v for k, v in vexflow_notes.items()}
-    
-    print("VexFlow notes data:", vexflow_notes_dict)  # Debugging line
-    
-    return render_template('display_score.html', 
-                           detected_notes=notes, 
-                           uploaded_image_url=uploaded_image_url, 
-                           vexflow_notes=vexflow_notes_dict,
-                           time_signature="3/4",
-                           score_id=score_id)
-
-@app.route("/record_performance")
-@login_required
-def record_performance():
-    # Get the latest score from the database
-    latest_score = Score.query.order_by(Score.id.desc()).first()
-    
-    if not latest_score:
-        flash('Please upload a score first', 'warning')
-        return redirect(url_for('dashboard'))
-    
-    note_data = NoteData.query.filter_by(score_id=latest_score.id).order_by(NoteData.measure, NoteData.id).all()
-    
-    vexflow_notes = defaultdict(list)
-    for note in note_data:
-        vexflow_duration = quantize_duration(note.duration)
-        
-        if note.note_name.lower() == 'rest':
-            note_key = "b/4"
-            is_rest = True
-        else:
-            note_name = note.note_name[:-1].lower()
-            octave = note.note_name[-1]
-            note_key = f"{note_name}/{octave}"
-            is_rest = False
-        
-        note_data = {
-            "keys": [note_key],
-            "duration": vexflow_duration,
-            "is_rest": is_rest
-        }
-        vexflow_notes[note.measure].append(note_data)
-    
-    vexflow_notes_dict = {str(k): v for k, v in vexflow_notes.items()}
-    
-    print("VexFlow notes data:", vexflow_notes_dict)  # Debug print
-    
-    return render_template('record_performance.html', 
-                         vexflow_notes=vexflow_notes_dict,
-                         score_id=latest_score.id)
-
 @app.route("/analyze_recording", methods=['POST'])
 @login_required
 def analyze_recording():
@@ -395,103 +235,6 @@ def analyze_recording():
         if os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
             logger.debug(f"Removed temporary audio file: {temp_audio_path}")
-
-def analyze_audio(audio_path, score_id):
-    logger.debug(f"Entering analyze_audio function with audio_path: {audio_path} and score_id: {score_id}")
-    try:
-        # Load the audio file using pydub
-        audio = AudioSegment.from_wav(audio_path)
-        samples = audio.get_array_of_samples()
-        logger.debug(f"Loaded audio file. Duration: {len(audio)/1000}s, Sample rate: {audio.frame_rate}Hz")
-        
-        # Convert to numpy array
-        y = np.array(samples).astype(np.float32) / 32768.0  # Normalize to [-1, 1]
-        sr = audio.frame_rate
-
-        # Extract pitch and onset information
-        logger.debug("Extracting pitch and onset information")
-        pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
-        onsets = librosa.onset.onset_detect(y=y, sr=sr, units='time')
-        logger.debug(f"Detected {len(onsets)} onsets")
-
-        # Detect notes
-        detected_notes = []
-        for onset in onsets:
-            start_frame = librosa.time_to_frames(onset, sr=sr)
-            end_frame = start_frame + sr // 2  # Analyze 0.5 seconds after onset
-            pitch_segment = pitches[:, start_frame:end_frame]
-            mag_segment = magnitudes[:, start_frame:end_frame]
-
-            pitch_index = np.unravel_index(mag_segment.argmax(), mag_segment.shape)
-            freq = pitch_segment[pitch_index]
-            note = librosa.hz_to_note(freq)
-            detected_notes.append((note, onset))
-        logger.debug(f"Detected {len(detected_notes)} notes: {detected_notes}")
-
-        # Get the original score
-        original_score = NoteData.query.filter_by(score_id=score_id).order_by(NoteData.measure, NoteData.id).all()
-        logger.debug(f"Retrieved original score with {len(original_score)} notes")
-
-        if not original_score:
-            logger.error(f"No score found with id {score_id}")
-            raise ValueError(f"No score found with id {score_id}")
-
-        # Compare detected notes with the original score
-        correct_notes = []
-        incorrect_notes = []
-        original_index = 0
-        detected_index = 0
-
-        while original_index < len(original_score) and detected_index < len(detected_notes):
-            original_note = original_score[original_index]
-            detected_note, detected_time = detected_notes[detected_index]
-
-            logger.debug(f"Comparing original note {original_note.note_name} with detected note {detected_note}")
-            if original_note.note_name.lower() == detected_note.lower():
-                correct_notes.append(original_index)
-                original_index += 1
-                detected_index += 1
-            else:
-                incorrect_notes.append(original_index)
-                original_index += 1
-
-        # Calculate accuracy
-        accuracy = len(correct_notes) / len(original_score) if original_score else 0
-        logger.debug(f"Calculated accuracy: {accuracy}")
-
-        # Generate feedback
-        feedback = generate_feedback(accuracy, correct_notes, incorrect_notes, original_score)
-        logger.debug(f"Generated feedback: {feedback}")
-
-        logger.debug(f"Detected notes: {detected_notes}")
-        logger.debug(f"Original score: {[(note.note_name, note.measure) for note in original_score]}")
-        
-        logger.debug(f"Correct notes: {correct_notes}")
-        logger.debug(f"Incorrect notes: {incorrect_notes}")
-        logger.debug(f"Accuracy: {accuracy}")
-
-        return accuracy, feedback, correct_notes, incorrect_notes
-    except Exception as e:
-        logger.error(f"Error in analyze_audio: {str(e)}", exc_info=True)
-        raise
-
-def generate_feedback(accuracy, correct_notes, incorrect_notes, original_score):
-    feedback = f"Your overall accuracy was {accuracy:.2%}. "
-
-    if accuracy >= 0.9:
-        feedback += "Excellent job! "
-    elif accuracy >= 0.7:
-        feedback += "Good work! "
-    elif accuracy >= 0.5:
-        feedback += "Nice effort! "
-    else:
-        feedback += "Keep practicing! "
-
-    if incorrect_notes:
-        feedback += "You might want to focus on the following measures: "
-        incorrect_measures = set(original_score[i].measure for i in incorrect_notes)
-
-    return feedback
 
 @app.route("/rhythm_check")
 @login_required
@@ -588,7 +331,23 @@ def init_db():
     except Exception as e:
         return f'Error initializing database: {str(e)}'
 
+# Error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {str(error)}", exc_info=True)
+    db.session.rollback()
+    return render_template('500.html'), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+    return render_template('500.html'), 500
+
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()  # This will create the tables based on your models
+        db.create_all()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
