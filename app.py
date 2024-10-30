@@ -71,22 +71,17 @@ def create_app():
     def allowed_file(filename):
         return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-def store_notes(notes, user_id):
-    try:
-        logger.debug(f"Storing notes for user {user_id}")
-        
-        # Create new score
-        new_score = Score(
-            title="Uploaded Score",
-            user_id=user_id
-        )
-        db.session.add(new_score)
-        db.session.flush()
-        
-        # Process notes
-        for note in notes:
-            # Check if note is in the correct format
-            if isinstance(note, dict) and 'pitch' in note and 'duration' in note:
+    def store_notes(notes, user_id):
+        try:
+            logger.debug(f"Storing notes for user {user_id}: {notes}")
+            new_score = Score(
+                title="Uploaded Score",
+                user_id=user_id
+            )
+            db.session.add(new_score)
+            db.session.flush()
+
+            for note in notes:
                 new_note = NoteData(
                     measure=note.get('measure', 1),
                     note_name=note['pitch'],
@@ -94,18 +89,14 @@ def store_notes(notes, user_id):
                     score_id=new_score.id
                 )
                 db.session.add(new_note)
-            else:
-                logger.error(f"Invalid note format: {note}")
-                raise ValueError(f"Invalid note format: {note}")
-
-        db.session.commit()
-        logger.info(f"Successfully stored score {new_score.id} with {len(notes)} notes")
-        return new_score.id
-
-    except Exception as e:
-        logger.error(f"Error storing notes: {str(e)}")
-        db.session.rollback()
-        raise
+            
+            db.session.commit()
+            logger.debug(f"Stored new score with id {new_score.id} and {len(notes)} notes")
+            return new_score.id
+        except Exception as e:
+            logger.error(f"Error storing notes: {str(e)}", exc_info=True)
+            db.session.rollback()
+            raise
 
     def quantize_duration(duration):
         duration_map = {
