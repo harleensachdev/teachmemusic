@@ -4,7 +4,7 @@ from flask_migrate import Migrate
 import os
 from models import db
 from werkzeug.utils import secure_filename
-from notedetection import detect_notes, detect_notes_from_musicxml, detect_notes_from_midi
+from template.notedetection import detect_notes, detect_notes_from_musicxml, detect_notes_from_midi
 from collections import defaultdict
 from datetime import datetime
 import librosa
