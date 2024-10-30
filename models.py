@@ -28,6 +28,6 @@ class NoteData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     measure = db.Column(db.Integer, nullable=False)
     note_name = db.Column(db.String(10), nullable=False)
-    duration = db.Column(db.String(10), nullable=False)
+    duration = db.Column(db.Float, nullable=False)
     score_id = db.Column(db.Integer, db.ForeignKey('score.id'), nullable=False)
     score = db.relationship('Score', back_populates='notes')
