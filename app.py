@@ -1,6 +1,7 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
 from flask_cors import CORS
 from flask_migrate import Migrate
+from models import User, Score, NoteData, PerformanceAnalysis  # Add this line
 import os
 from models import db
 from werkzeug.utils import secure_filename
