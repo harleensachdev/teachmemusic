@@ -71,15 +71,19 @@ def create_app():
     def allowed_file(filename):
         return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-    def store_notes(notes):
+    def store_notes(notes, user_id):
         try:
-            new_score = Score(title="Uploaded Score")
+            logger.debug(f"Storing notes for user {user_id}: {notes}")
+            new_score = Score(
+                title="Uploaded Score",
+                user_id=user_id
+            )
             db.session.add(new_score)
             db.session.flush()
 
             for note in notes:
                 new_note = NoteData(
-                    measure=note['measure'],
+                    measure=note.get('measure', 1),
                     note_name=note['pitch'],
                     duration=str(note['duration']),
                     score_id=new_score.id
@@ -90,7 +94,7 @@ def create_app():
             logger.debug(f"Stored new score with id {new_score.id} and {len(notes)} notes")
             return new_score.id
         except Exception as e:
-            logger.error(f'Error storing notes: {e}')
+            logger.error(f"Error storing notes: {str(e)}", exc_info=True)
             db.session.rollback()
             raise
 
@@ -229,37 +233,45 @@ def create_app():
     @app.route("/record_performance")
     @login_required
     def record_performance():
-        latest_score = Score.query.order_by(Score.id.desc()).first()
-        
-        if not latest_score:
-            flash('Please upload a score first', 'warning')
-        
-        note_data = NoteData.query.filter_by(score_id=latest_score.id).order_by(NoteData.measure, NoteData.id).all()
-        vexflow_notes = defaultdict(list)
-        
-        for note in note_data:
-            vexflow_duration = quantize_duration(note.duration)
-            if note.note_name.lower() == 'rest':
-                note_key = "b/4"
-                is_rest = True
-            else:
-                note_name = note.note_name[:-1].lower()
-                octave = note.note_name[-1]
-                note_key = f"{note_name}/{octave}"
-                is_rest = False
+        try:
+            # Filter scores by current user
+            latest_score = Score.query.filter_by(user_id=current_user.id).order_by(Score.id.desc()).first()
             
-            note_data = {
-                "keys": [note_key],
-                "duration": vexflow_duration,
-                "is_rest": is_rest
-            }
-            vexflow_notes[note.measure].append(note_data)
-        
-        vexflow_notes_dict = {str(k): v for k, v in vexflow_notes.items()}
-        
-        return render_template('record_performance.html', 
-                             vexflow_notes=vexflow_notes_dict,
-                             score_id=latest_score.id)
+            if not latest_score:
+                flash('No score found. Please upload a score first.', 'warning')
+                return redirect(url_for('dashboard'))
+                
+            notes = NoteData.query.filter_by(score_id=latest_score.id).order_by(NoteData.measure, NoteData.id).all()
+            vexflow_notes = defaultdict(list)
+            
+            for note in notes:
+                vexflow_duration = quantize_duration(note.duration)
+                if note.note_name.lower() == 'rest':
+                    note_key = "b/4"
+                    is_rest = True
+                else:
+                    note_name = note.note_name[:-1].lower()
+                    octave = note.note_name[-1]
+                    note_key = f"{note_name}/{octave}"
+                    is_rest = False
+                
+                note_data = {
+                    "keys": [note_key],
+                    "duration": vexflow_duration,
+                    "is_rest": is_rest
+                }
+                vexflow_notes[note.measure].append(note_data)
+            
+            vexflow_notes_dict = {str(k): v for k, v in vexflow_notes.items()}
+            
+            return render_template('record_performance.html', 
+                                 vexflow_notes=vexflow_notes_dict,
+                                 score_id=latest_score.id)
+
+        except Exception as e:
+            logger.error(f"Error in record_performance: {str(e)}", exc_info=True)
+            flash('Error loading performance recorder', 'danger')
+            return redirect(url_for('dashboard'))
 
     @app.route("/analyze_recording", methods=['POST'])
     @login_required
@@ -414,7 +426,6 @@ def create_app():
                     file.save(filepath)
                     logger.debug(f"File saved to {filepath}")
 
-                    # Process file based on type
                     try:
                         if filename.endswith(('.xml', '.musicxml')):
                             notes = detect_notes_from_musicxml(filepath)
@@ -423,14 +434,14 @@ def create_app():
                         else:
                             notes = detect_notes(filepath)
                         
-                        # Store notes in database using helper function
-                        score_id = store_notes(notes['notes'])
+                        # Pass current_user.id to store_notes
+                        score_id = store_notes(notes['notes'], current_user.id)  # Add current_user.id
                         
                         flash('Score uploaded successfully!', 'success')
                         return redirect(url_for('display_score', score_id=score_id))
                         
                     except Exception as e:
-                        logger.error(f"Error processing file: {str(e)}")
+                        logger.error(f"Error processing file: {str(e)}", exc_info=True)
                         flash('Error processing file', 'danger')
                         return redirect(url_for('dashboard'))
 
