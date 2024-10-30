@@ -85,16 +85,16 @@ def create_app():
                 new_note = NoteData(
                     measure=note.get('measure', 1),
                     note_name=note['pitch'],
-                    duration=str(note['duration']),
+                    duration=float(note['duration']),  # Convert string to float
                     score_id=new_score.id
                 )
                 db.session.add(new_note)
             
             db.session.commit()
-            logger.debug(f"Stored new score with id {new_score.id} and {len(notes)} notes")
+            logger.debug(f"Stored new score with id {new_score.id}")
             return new_score.id
         except Exception as e:
-            logger.error(f"Error storing notes: {str(e)}", exc_info=True)
+            logger.error(f"Error storing notes: {str(e)}")
             db.session.rollback()
             raise
 
