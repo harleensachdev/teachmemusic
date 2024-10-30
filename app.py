@@ -4,7 +4,7 @@ from flask_migrate import Migrate
 import os
 from models import db
 from werkzeug.utils import secure_filename
-from templates.notedetection import detect_notes, detect_notes_from_musicxml, detect_notes_from_midi
+from notedetection import detect_notes, detect_notes_from_musicxml, detect_notes_from_midifrom
 from collections import defaultdict
 from datetime import datetime
 import librosa
@@ -147,6 +147,7 @@ def create_app():
             return redirect(url_for('login'))
         
         return render_template('register.html')
+
     @app.route("/login", methods=['GET', 'POST'])
     def login():
         if current_user.is_authenticated:
