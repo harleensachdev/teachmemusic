@@ -2,6 +2,7 @@ from flask import Flask, render_template, redirect, url_for, request, flash, jso
 from flask_cors import CORS
 from flask_migrate import Migrate
 from models import User, Score, NoteData, PerformanceAnalysis  # Add this line
+
 import os
 from models import db
 from werkzeug.utils import secure_filename
@@ -182,38 +183,48 @@ def create_app():
     @app.route("/display_score")
     @login_required
     def display_score():
-        score_id = request.args.get('score_id')
-        notes = NoteData.query.filter_by(score_id=score_id).order_by(NoteData.measure, NoteData.id).all()
-        image_filename = request.args.get('image', '')
-        uploaded_image_url = url_for('static', filename=f'uploads/{image_filename}')
-        
-        vexflow_notes = defaultdict(list)
-        for note in notes:
-            vexflow_duration = quantize_duration(note.duration)
-            if note.note_name.lower() == 'rest':
-                note_key = "b/4"
-                is_rest = True
-            else:
-                note_name = note.note_name[:-1].lower()
-                octave = note.note_name[-1]
-                note_key = f"{note_name}/{octave}"
-                is_rest = False
+        try:
+            latest_score = Score.query.order_by(Score.id.desc()).first()
             
-            note_data = {
-                "keys": [note_key],
-                "duration": vexflow_duration,
-                "is_rest": is_rest
-            }
-            vexflow_notes[note.measure].append(note_data)
-        
-        vexflow_notes_dict = {str(k): v for k, v in vexflow_notes.items()}
-        
-        return render_template('display_score.html', 
-                             detected_notes=notes, 
-                             uploaded_image_url=uploaded_image_url, 
-                             vexflow_notes=vexflow_notes_dict,
-                             time_signature="3/4",
-                             score_id=score_id)
+            if not latest_score:
+                vexflow_notes = {
+                    '1': [
+                        {"keys": ["c/4"], "duration": "q"},
+                        {"keys": ["d/4"], "duration": "q"},
+                        {"keys": ["e/4"], "duration": "q"},
+                        {"keys": ["f/4"], "duration": "q"}
+                    ]
+                }
+            else:
+                notes = NoteData.query.filter_by(score_id=latest_score.id).order_by(NoteData.measure, NoteData.id).all()
+                vexflow_notes = defaultdict(list)
+                
+                for note in notes:
+                    vexflow_duration = quantize_duration(note.duration)
+                    if note.note_name.lower() == 'rest':
+                        note_key = "b/4"
+                        is_rest = True
+                    else:
+                        note_name = note.note_name[:-1].lower()
+                        octave = note.note_name[-1]
+                        note_key = f"{note_name}/{octave}"
+                        is_rest = False
+                    
+                    note_data = {
+                        "keys": [note_key],
+                        "duration": vexflow_duration,
+                        "is_rest": is_rest
+                    }
+                    vexflow_notes[str(note.measure)].append(note_data)
+            
+            return render_template('display_score.html', 
+                                 vexflow_notes=vexflow_notes,
+                                 score_id=latest_score.id if latest_score else None)
+                                 
+        except Exception as e:
+            logger.error(f"Error in display_score route: {str(e)}", exc_info=True)
+            flash('Error loading score display. Please try again.', 'danger')
+            return redirect(url_for('dashboard'))
 
     @app.route("/record_performance")
     @login_required
@@ -222,7 +233,6 @@ def create_app():
         
         if not latest_score:
             flash('Please upload a score first', 'warning')
-            return redirect(url_for('dashboard'))
         
         note_data = NoteData.query.filter_by(score_id=latest_score.id).order_by(NoteData.measure, NoteData.id).all()
         vexflow_notes = defaultdict(list)
@@ -378,6 +388,61 @@ def create_app():
                 'status': 'error',
                 'message': 'Error saving rhythm score'
             }), 500
+
+    @app.route("/upload_score", methods=['GET', 'POST'])
+    @login_required
+    def upload_score():
+        if request.method == 'POST':
+            try:
+                if 'music_score' not in request.files:
+                    flash('No file selected', 'danger')
+                    return redirect(url_for('dashboard'))
+
+                file = request.files['music_score']
+                if file.filename == '':
+                    flash('No file selected', 'danger')
+                    return redirect(url_for('dashboard'))
+
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filepath = os.path.join('static', 'uploads', filename)
+                    
+                    # Ensure directory exists
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    
+                    # Save the file
+                    file.save(filepath)
+                    logger.debug(f"File saved to {filepath}")
+
+                    # Process file based on type
+                    try:
+                        if filename.endswith(('.xml', '.musicxml')):
+                            notes = detect_notes_from_musicxml(filepath)
+                        elif filename.endswith(('.mid', '.midi')):
+                            notes = detect_notes_from_midi(filepath)
+                        else:
+                            notes = detect_notes(filepath)
+                        
+                        # Store notes in database using helper function
+                        score_id = store_notes(notes['notes'])
+                        
+                        flash('Score uploaded successfully!', 'success')
+                        return redirect(url_for('display_score', score_id=score_id))
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing file: {str(e)}")
+                        flash('Error processing file', 'danger')
+                        return redirect(url_for('dashboard'))
+
+                flash('Invalid file type', 'danger')
+                return redirect(url_for('dashboard'))
+                
+            except Exception as e:
+                logger.error(f"Upload error: {str(e)}")
+                flash('Upload failed', 'danger')
+                return redirect(url_for('dashboard'))
+
+        return render_template('upload_score.html')
 
     return app
 
