@@ -434,8 +434,11 @@ def create_app():
                         else:
                             notes = detect_notes(filepath)
                         
-                        # Pass current_user.id to store_notes
-                        score_id = store_notes(notes['notes'], current_user.id)  # Add current_user.id
+                        # Convert durations to float before storing
+                        for note in notes['notes']:
+                            note['duration'] = float(note['duration'])
+                        
+                        score_id = store_notes(notes['notes'], current_user.id)
                         
                         flash('Score uploaded successfully!', 'success')
                         return redirect(url_for('display_score', score_id=score_id))
