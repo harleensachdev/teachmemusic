@@ -1,9 +1,1 @@
-TeachMeMusic is an interactive web-based music learning application designed to support students, especially those in remote or underserved regions, 
-in developing foundational music skills. With tools for rhythm accuracy, pitch checking, and score display, TeachMeMusic aims to make quality music education accessible and engaging.
-
-Key Features
-Rhythm Check: Analyzes note timing with real-time feedback, helping students improve their rhythm and musicality.
-Dynamic Score Display: Provides a digital, interactive view of sheet music with support for MusicXML and MIDI formats.
-Pitch Accuracy: Offers real-time pitch feedback, allowing students to enhance their ear training and intonation.
-Optical Music Recognition (OMR): In development to enable users to upload images or PDFs of sheet music for direct analysis and practice.
-Ideal For: Musicians, particularly violin students, seeking accessible, self-paced music education tools.
+TeachMeMusic is a web-based music learning app designed to support students, especially in remote or underserved areas, in building foundational music skills. Featuring tools for rhythm and pitch accuracy as well as a dynamic score display, it offers real-time feedback on timing, intonation, and musicality. With support for MusicXML and MIDI formats and Optical Music Recognition (OMR) in development to allow uploads of sheet music images or PDFs, TeachMeMusic provides an engaging, accessible platform for musicians, particularly violin students, to learn and practice independently.
